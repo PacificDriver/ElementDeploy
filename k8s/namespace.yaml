@@ -1,0 +1,8 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: element
+  labels:
+    name: element
+    app: element-web
+

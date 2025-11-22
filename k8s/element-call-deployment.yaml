@@ -1,0 +1,90 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: element-call
+  namespace: element
+  labels:
+    app: element-call
+    component: backend
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: element-call
+  template:
+    metadata:
+      labels:
+        app: element-call
+        component: backend
+    spec:
+      containers:
+      - name: element-call
+        image: vectorim/element-call:latest
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 3000
+          name: http
+        - containerPort: 8443
+          name: turn
+        volumeMounts:
+        - name: config
+          mountPath: /app/config/config.json
+          subPath: config.json
+        env:
+        - name: NODE_ENV
+          value: "production"
+        - name: ELEMENT_CALL_SERVER_NAME
+          valueFrom:
+            configMapKeyRef:
+              name: element-call-config
+              key: server_name
+        - name: ELEMENT_CALL_BASE_URL
+          valueFrom:
+            configMapKeyRef:
+              name: element-call-config
+              key: base_url
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "200m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 3000
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 3000
+          initialDelaySeconds: 10
+          periodSeconds: 5
+      volumes:
+      - name: config
+        configMap:
+          name: element-call-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: element-call
+  namespace: element
+  labels:
+    app: element-call
+spec:
+  type: ClusterIP
+  ports:
+  - port: 3000
+    targetPort: 3000
+    protocol: TCP
+    name: http
+  - port: 8443
+    targetPort: 8443
+    protocol: TCP
+    name: turn
+  selector:
+    app: element-call
+

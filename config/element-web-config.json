@@ -1,0 +1,72 @@
+{
+  "default_server_config": {
+    "m.homeserver": {
+      "base_url": "${SYNAPSE_BASE_URL:-https://synapse.test.duxigo.org}",
+      "server_name": "${SYNAPSE_SERVER_NAME:-test.duxigo.org}"
+    },
+    "m.identity_server": {
+      "base_url": "${IDENTITY_SERVER_URL:-https://vector.im}"
+    }
+  },
+  "default_server_name": "${SYNAPSE_SERVER_NAME:-test.duxigo.org}",
+  "brand": "Element",
+  "integrations_ui_url": "https://scalar.vector.im/",
+  "integrations_rest_url": "https://scalar.vector.im/api",
+  "integrations_widgets_urls": [
+    "https://scalar.vector.im/_matrix/integrations/v1",
+    "https://scalar.vector.im/_matrix/integrations/v2",
+    "https://scalar-staging.vector.im/_matrix/integrations/v1",
+    "https://scalar-staging.vector.im/_matrix/integrations/v2",
+    "https://scalar-staging.riot.im/scalar/api"
+  ],
+  "bug_report_endpoint_url": "https://element.io/bugreports/submit",
+  "defaultCountryCode": "RU",
+  "showLabsSettings": true,
+  "features": {
+    "feature_new_spinner": true,
+    "feature_pinning": true,
+    "feature_custom_status": true,
+    "feature_custom_tags": true,
+    "feature_state_counters": true
+  },
+  "default_federate": true,
+  "default_theme": "light",
+  "roomDirectory": {
+    "servers": [
+      "${SYNAPSE_SERVER_NAME:-test.duxigo.org}"
+    ]
+  },
+  "settingDefaults": {
+    "breadcrumbs": true
+  },
+  "jitsi": {
+    "preferredDomain": "meet.jit.si"
+  },
+  "element_call": {
+    "url": "${ELEMENT_CALL_URL:-https://call.test.duxigo.org}"
+  },
+  "map_style_url": "https://api.maptiler.com/maps/streets/style.json?key=${MAPTILER_KEY}",
+  "piwik": {
+    "url": "",
+    "siteId": "",
+    "policyUrl": ""
+  },
+  "enable_presence_by_hs_url": {
+    "${SYNAPSE_BASE_URL:-https://synapse.test.duxigo.org}": true
+  },
+  "terms_and_conditions_links": [
+    {
+      "url": "https://element.io/terms-of-service",
+      "text": "Terms and Conditions"
+    }
+  ],
+  "sentry": {
+    "dsn": "",
+    "environment": ""
+  },
+  "posthog": {
+    "project_api_key": "",
+    "api_host": ""
+  }
+}
+

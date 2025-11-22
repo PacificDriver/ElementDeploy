@@ -1,0 +1,21 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: element-call-config
+  namespace: element
+data:
+  config.json: |
+    {
+      "default_server_config": {
+        "m.homeserver": {
+          "base_url": "https://synapse.test.duxigo.org",
+          "server_name": "test.duxigo.org"
+        }
+      },
+      "default_server_name": "test.duxigo.org",
+      "brand": "Element Call",
+      "element_call_base_url": "https://call.test.duxigo.org"
+    }
+  server_name: "element-call"
+  base_url: "https://call.test.duxigo.org"
+

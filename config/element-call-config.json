@@ -1,0 +1,20 @@
+{
+  "default_server_config": {
+    "m.homeserver": {
+      "base_url": "${SYNAPSE_BASE_URL:-https://synapse.test.duxigo.org}",
+      "server_name": "${SYNAPSE_SERVER_NAME:-test.duxigo.org}"
+    }
+  },
+  "default_server_name": "${SYNAPSE_SERVER_NAME:-test.duxigo.org}",
+  "brand": "Element Call",
+  "element_call_base_url": "${ELEMENT_CALL_BASE_URL:-https://call.test.duxigo.org}",
+  "pinned_rooms": [],
+  "analytics": {
+    "enabled": false
+  },
+  "sentry": {
+    "dsn": "",
+    "environment": ""
+  }
+}
+
