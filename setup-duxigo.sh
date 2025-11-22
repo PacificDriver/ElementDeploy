@@ -131,14 +131,79 @@ echo "🔐 Проверка SSL сертификатов..."
 if [ ! -f "certs/fullchain.pem" ] || [ ! -f "certs/privkey.pem" ]; then
     echo "⚠️  SSL сертификаты не найдены в certs/"
     echo ""
-    echo "Для получения SSL сертификатов Let's Encrypt выполните:"
-    echo "   sudo certbot certonly --standalone -d ${DOMAIN} -d ${CALL_DOMAIN}"
-    echo ""
-    echo "Затем скопируйте сертификаты в папку certs/:"
-    echo "   sudo cp /etc/letsencrypt/live/${DOMAIN}/fullchain.pem certs/"
-    echo "   sudo cp /etc/letsencrypt/live/${DOMAIN}/privkey.pem certs/"
-    echo ""
-    read -p "Нажмите Enter после настройки SSL сертификатов (или если пропускаете этот шаг): "
+    
+    # Проверяем наличие certbot
+    if command -v certbot &> /dev/null; then
+        echo "✅ Certbot найден. Автоматическое получение SSL сертификатов..."
+        echo ""
+        
+        # Запрашиваем email для Let's Encrypt
+        read -p "Введите email для уведомлений Let's Encrypt (необязательно, можно пропустить Enter): " CERT_EMAIL
+        
+        # Подготавливаем команду certbot
+        CERTBOT_CMD="sudo certbot certonly --standalone --agree-tos --non-interactive"
+        
+        if [ -n "$CERT_EMAIL" ]; then
+            CERTBOT_CMD="$CERTBOT_CMD --email $CERT_EMAIL"
+        else
+            CERTBOT_CMD="$CERTBOT_CMD --register-unsafely-without-email"
+        fi
+        
+        CERTBOT_CMD="$CERTBOT_CMD -d $DOMAIN -d $CALL_DOMAIN"
+        
+        echo "Получаем сертификаты для доменов: $DOMAIN и $CALL_DOMAIN"
+        echo "Выполняем: $CERTBOT_CMD"
+        echo ""
+        
+        # Выполняем получение сертификатов
+        if eval $CERTBOT_CMD; then
+            echo "✅ Сертификаты успешно получены!"
+            
+            # Копируем сертификаты в папку certs/
+            if [ -f "/etc/letsencrypt/live/${DOMAIN}/fullchain.pem" ] && [ -f "/etc/letsencrypt/live/${DOMAIN}/privkey.pem" ]; then
+                echo "Копируем сертификаты в папку certs/..."
+                sudo cp "/etc/letsencrypt/live/${DOMAIN}/fullchain.pem" certs/
+                sudo cp "/etc/letsencrypt/live/${DOMAIN}/privkey.pem" certs/
+                
+                # Устанавливаем правильные права доступа
+                sudo chmod 644 certs/fullchain.pem
+                sudo chmod 600 certs/privkey.pem
+                
+                # Если скопировали от root, меняем владельца на текущего пользователя
+                if [ "$(id -u)" != "0" ]; then
+                    sudo chown "$USER:$USER" certs/fullchain.pem certs/privkey.pem
+                fi
+                
+                echo "✅ Сертификаты скопированы в certs/"
+            else
+                echo "⚠️  Сертификаты не найдены в /etc/letsencrypt/live/${DOMAIN}/"
+            fi
+        else
+            echo "❌ Ошибка при получении сертификатов"
+            echo ""
+            echo "Возможные причины:"
+            echo "  - Домены не указывают на этот сервер (проверьте DNS)"
+            echo "  - Порты 80 и 443 уже заняты (остановите веб-сервер перед получением сертификатов)"
+            echo "  - Сервер недоступен из интернета"
+            echo ""
+            read -p "Нажмите Enter чтобы продолжить без SSL (или Ctrl+C для выхода): "
+        fi
+    else
+        echo "⚠️  Certbot не установлен"
+        echo ""
+        echo "Для установки certbot выполните:"
+        echo "   sudo apt-get update"
+        echo "   sudo apt-get install certbot"
+        echo ""
+        echo "Или получите сертификаты вручную:"
+        echo "   sudo certbot certonly --standalone -d ${DOMAIN} -d ${CALL_DOMAIN}"
+        echo "   sudo cp /etc/letsencrypt/live/${DOMAIN}/fullchain.pem certs/"
+        echo "   sudo cp /etc/letsencrypt/live/${DOMAIN}/privkey.pem certs/"
+        echo ""
+        read -p "Нажмите Enter после установки certbot и получения сертификатов (или для пропуска): "
+    fi
+else
+    echo "✅ SSL сертификаты уже существуют"
 fi
 
 # Обновление конфигурации nginx
