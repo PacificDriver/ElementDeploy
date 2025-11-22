@@ -1,12 +1,61 @@
-# PowerShell скрипт автоматической настройки для test.duxigo.org
+# PowerShell скрипт автоматической настройки для Element
 # Использование: .\setup-duxigo.ps1
 
 $ErrorActionPreference = "Stop"
 
-$DOMAIN = "test.duxigo.org"
-$CALL_DOMAIN = "call.test.duxigo.org"
-$SYNAPSE_DOMAIN = "synapse.test.duxigo.org"
+Write-Host "==========================================" -ForegroundColor Cyan
+Write-Host "Настройка Element" -ForegroundColor Cyan
+Write-Host "==========================================" -ForegroundColor Cyan
+Write-Host ""
 
+# Запрос домена у пользователя
+Write-Host "Введите данные для настройки:" -ForegroundColor Yellow
+Write-Host ""
+
+$DOMAIN = Read-Host "Домен для Element Web (например: test.duxigo.org)"
+while ([string]::IsNullOrWhiteSpace($DOMAIN)) {
+    Write-Host "Домен не может быть пустым!" -ForegroundColor Red
+    $DOMAIN = Read-Host "Домен для Element Web (например: test.duxigo.org)"
+}
+
+$defaultCallDomain = "call.$DOMAIN"
+$CALL_DOMAIN = Read-Host "Домен для Element Call [$defaultCallDomain]"
+if ([string]::IsNullOrWhiteSpace($CALL_DOMAIN)) {
+    $CALL_DOMAIN = $defaultCallDomain
+}
+
+Write-Host ""
+Write-Host "Введите данные Synapse сервера:" -ForegroundColor Yellow
+$SYNAPSE_BASE_URL = Read-Host "URL Synapse сервера (например: https://synapse.test.duxigo.org)"
+while ([string]::IsNullOrWhiteSpace($SYNAPSE_BASE_URL)) {
+    Write-Host "URL Synapse не может быть пустым!" -ForegroundColor Red
+    $SYNAPSE_BASE_URL = Read-Host "URL Synapse сервера (например: https://synapse.test.duxigo.org)"
+}
+
+# Парсим домен из URL для SYNAPSE_HOST
+if ($SYNAPSE_BASE_URL -match 'https?://([^/]+)') {
+    $SYNAPSE_DOMAIN = $matches[1]
+} else {
+    $SYNAPSE_DOMAIN = $SYNAPSE_BASE_URL -replace 'https?://', ''
+}
+
+$SYNAPSE_SERVER_NAME = Read-Host "Имя сервера Synapse [$DOMAIN]"
+if ([string]::IsNullOrWhiteSpace($SYNAPSE_SERVER_NAME)) {
+    $SYNAPSE_SERVER_NAME = $DOMAIN
+}
+
+Write-Host ""
+Write-Host "Опциональные настройки (можно оставить пустыми):" -ForegroundColor Yellow
+$TURN_USERNAME = Read-Host "TURN сервер - имя пользователя"
+$TURN_PASSWORD_INPUT = Read-Host "TURN сервер - пароль"
+$TURN_PASSWORD_PLAIN = ""
+if (-not [string]::IsNullOrWhiteSpace($TURN_PASSWORD_INPUT)) {
+    $TURN_PASSWORD_PLAIN = $TURN_PASSWORD_INPUT
+}
+
+$MAPTILER_KEY = Read-Host "MapTiler API Key (для карт)"
+
+Write-Host ""
 Write-Host "==========================================" -ForegroundColor Cyan
 Write-Host "Настройка Element для $DOMAIN" -ForegroundColor Cyan
 Write-Host "==========================================" -ForegroundColor Cyan
@@ -28,10 +77,11 @@ if (-not (Get-Command docker-compose -ErrorAction SilentlyContinue)) {
 # Создание .env файла
 if (-not (Test-Path .env)) {
     Write-Host "📝 Создание .env файла..." -ForegroundColor Green
-    @"
-# Конфигурация для test.duxigo.org
-SYNAPSE_BASE_URL=https://$SYNAPSE_DOMAIN
-SYNAPSE_SERVER_NAME=$DOMAIN
+    
+    $envContent = @"
+# Конфигурация для $DOMAIN
+SYNAPSE_BASE_URL=$SYNAPSE_BASE_URL
+SYNAPSE_SERVER_NAME=$SYNAPSE_SERVER_NAME
 SYNAPSE_HOST=$SYNAPSE_DOMAIN
 
 ELEMENT_WEB_DOMAIN=$DOMAIN
@@ -49,15 +99,31 @@ ELEMENT_WEB_VERSION=1.11.0
 ELEMENT_CALL_VERSION=0.5.0
 
 TURN_SERVER_URL=turn:$CALL_DOMAIN:3478
-TURN_USERNAME=
-TURN_PASSWORD=
-STUN_SERVER_URL=stun:$CALL_DOMAIN:3478
-"@ | Out-File -FilePath .env -Encoding UTF8
+"@
+
+    if (-not [string]::IsNullOrWhiteSpace($TURN_USERNAME)) {
+        $envContent += "`nTURN_USERNAME=$TURN_USERNAME"
+    } else {
+        $envContent += "`nTURN_USERNAME="
+    }
     
-    Write-Host "✅ .env файл создан. Пожалуйста, отредактируйте его и укажите:" -ForegroundColor Green
-    Write-Host "   - Реальный URL вашего Synapse сервера" -ForegroundColor Yellow
-    Write-Host "   - Данные TURN сервера (если есть)" -ForegroundColor Yellow
-    Read-Host "Нажмите Enter после редактирования .env файла"
+    if (-not [string]::IsNullOrWhiteSpace($TURN_PASSWORD_PLAIN)) {
+        $envContent += "`nTURN_PASSWORD=$TURN_PASSWORD_PLAIN"
+    } else {
+        $envContent += "`nTURN_PASSWORD="
+    }
+    
+    $envContent += "`nSTUN_SERVER_URL=stun:$CALL_DOMAIN:3478"
+    
+    if (-not [string]::IsNullOrWhiteSpace($MAPTILER_KEY)) {
+        $envContent += "`nMAPTILER_KEY=$MAPTILER_KEY"
+    }
+    
+    $envContent | Out-File -FilePath .env -Encoding UTF8
+    
+    Write-Host "✅ .env файл создан с указанными параметрами" -ForegroundColor Green
+} else {
+    Write-Host "⚠️  Файл .env уже существует, пропускаем создание" -ForegroundColor Yellow
 }
 
 # Создание директорий
@@ -80,6 +146,21 @@ if (-not (Test-Path "element-repos")) {
 if (Test-Path "fix-sdk-versions.ps1") {
     Write-Host "🔒 Фиксация версий SDK..." -ForegroundColor Green
     .\fix-sdk-versions.ps1
+}
+
+# Проверка SSL сертификатов
+Write-Host "🔐 Проверка SSL сертификатов..." -ForegroundColor Green
+if (-not (Test-Path "certs\fullchain.pem") -or -not (Test-Path "certs\privkey.pem")) {
+    Write-Host "⚠️  SSL сертификаты не найдены в certs/" -ForegroundColor Yellow
+    Write-Host ""
+    Write-Host "Для получения SSL сертификатов Let's Encrypt выполните:" -ForegroundColor Cyan
+    Write-Host "   certbot certonly --standalone -d $DOMAIN -d $CALL_DOMAIN" -ForegroundColor Yellow
+    Write-Host ""
+    Write-Host "Затем скопируйте сертификаты в папку certs/:" -ForegroundColor Cyan
+    Write-Host "   copy C:\etc\letsencrypt\live\$DOMAIN\fullchain.pem certs\" -ForegroundColor Yellow
+    Write-Host "   copy C:\etc\letsencrypt\live\$DOMAIN\privkey.pem certs\" -ForegroundColor Yellow
+    Write-Host ""
+    $sslReady = Read-Host "Нажмите Enter после настройки SSL сертификатов (или если пропускаете этот шаг)"
 }
 
 # Обновление конфигурации nginx

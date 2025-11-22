@@ -1,14 +1,55 @@
 #!/bin/bash
 
-# Автоматический скрипт настройки для test.duxigo.org
+# Автоматический скрипт настройки для Element
 # Использование: ./setup-duxigo.sh
 
 set -e
 
-DOMAIN="test.duxigo.org"
-CALL_DOMAIN="call.test.duxigo.org"
-SYNAPSE_DOMAIN="synapse.test.duxigo.org"
+echo "=========================================="
+echo "Настройка Element"
+echo "=========================================="
+echo ""
 
+# Запрос домена у пользователя
+echo "Введите данные для настройки:"
+echo ""
+
+read -p "Домен для Element Web (например: test.duxigo.org): " DOMAIN
+while [ -z "$DOMAIN" ]; do
+    echo "Домен не может быть пустым!"
+    read -p "Домен для Element Web (например: test.duxigo.org): " DOMAIN
+done
+
+DEFAULT_CALL_DOMAIN="call.$DOMAIN"
+read -p "Домен для Element Call [$DEFAULT_CALL_DOMAIN]: " CALL_DOMAIN
+if [ -z "$CALL_DOMAIN" ]; then
+    CALL_DOMAIN="$DEFAULT_CALL_DOMAIN"
+fi
+
+echo ""
+echo "Введите данные Synapse сервера:"
+read -p "URL Synapse сервера (например: https://synapse.test.duxigo.org): " SYNAPSE_BASE_URL
+while [ -z "$SYNAPSE_BASE_URL" ]; do
+    echo "URL Synapse не может быть пустым!"
+    read -p "URL Synapse сервера (например: https://synapse.test.duxigo.org): " SYNAPSE_BASE_URL
+done
+
+# Парсим домен из URL для SYNAPSE_HOST
+SYNAPSE_DOMAIN=$(echo "$SYNAPSE_BASE_URL" | sed -e 's|^[^/]*//||' -e 's|/.*$||')
+
+read -p "Имя сервера Synapse [$DOMAIN]: " SYNAPSE_SERVER_NAME
+if [ -z "$SYNAPSE_SERVER_NAME" ]; then
+    SYNAPSE_SERVER_NAME="$DOMAIN"
+fi
+
+echo ""
+echo "Опциональные настройки (можно оставить пустыми):"
+read -p "TURN сервер - имя пользователя: " TURN_USERNAME
+read -sp "TURN сервер - пароль: " TURN_PASSWORD
+echo ""
+read -p "MapTiler API Key (для карт): " MAPTILER_KEY
+
+echo ""
 echo "=========================================="
 echo "Настройка Element для $DOMAIN"
 echo "=========================================="
@@ -33,9 +74,9 @@ fi
 if [ ! -f .env ]; then
     echo "📝 Создание .env файла..."
     cat > .env << EOF
-# Конфигурация для test.duxigo.org
-SYNAPSE_BASE_URL=https://${SYNAPSE_DOMAIN}
-SYNAPSE_SERVER_NAME=${DOMAIN}
+# Конфигурация для ${DOMAIN}
+SYNAPSE_BASE_URL=${SYNAPSE_BASE_URL}
+SYNAPSE_SERVER_NAME=${SYNAPSE_SERVER_NAME}
 SYNAPSE_HOST=${SYNAPSE_DOMAIN}
 
 ELEMENT_WEB_DOMAIN=${DOMAIN}
@@ -53,14 +94,18 @@ ELEMENT_WEB_VERSION=1.11.0
 ELEMENT_CALL_VERSION=0.5.0
 
 TURN_SERVER_URL=turn:${CALL_DOMAIN}:3478
-TURN_USERNAME=
-TURN_PASSWORD=
+TURN_USERNAME=${TURN_USERNAME}
+TURN_PASSWORD=${TURN_PASSWORD}
 STUN_SERVER_URL=stun:${CALL_DOMAIN}:3478
 EOF
-    echo "✅ .env файл создан. Пожалуйста, отредактируйте его и укажите:"
-    echo "   - Реальный URL вашего Synapse сервера"
-    echo "   - Данные TURN сервера (если есть)"
-    read -p "Нажмите Enter после редактирования .env файла..."
+
+    if [ -n "$MAPTILER_KEY" ]; then
+        echo "MAPTILER_KEY=${MAPTILER_KEY}" >> .env
+    fi
+
+    echo "✅ .env файл создан с указанными параметрами"
+else
+    echo "⚠️  Файл .env уже существует, пропускаем создание"
 fi
 
 # Создание директорий
@@ -85,12 +130,15 @@ fi
 echo "🔐 Проверка SSL сертификатов..."
 if [ ! -f "certs/fullchain.pem" ] || [ ! -f "certs/privkey.pem" ]; then
     echo "⚠️  SSL сертификаты не найдены в certs/"
-    echo "   Получите сертификаты Let's Encrypt:"
+    echo ""
+    echo "Для получения SSL сертификатов Let's Encrypt выполните:"
     echo "   sudo certbot certonly --standalone -d ${DOMAIN} -d ${CALL_DOMAIN}"
-    echo "   Затем скопируйте их в certs/:"
+    echo ""
+    echo "Затем скопируйте сертификаты в папку certs/:"
     echo "   sudo cp /etc/letsencrypt/live/${DOMAIN}/fullchain.pem certs/"
     echo "   sudo cp /etc/letsencrypt/live/${DOMAIN}/privkey.pem certs/"
-    read -p "Нажмите Enter после настройки SSL сертификатов..."
+    echo ""
+    read -p "Нажмите Enter после настройки SSL сертификатов (или если пропускаете этот шаг): "
 fi
 
 # Обновление конфигурации nginx
