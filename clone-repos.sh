@@ -3,7 +3,7 @@
 # Скрипт для клонирования репозиториев Element
 # Использование: ./clone-repos.sh
 
-set -e
+# Не используем set -e, чтобы обрабатывать ошибки клонирования
 
 ELEMENT_ORG="https://github.com/element-hq"
 REPOS_DIR="./element-repos"
@@ -32,7 +32,12 @@ for repo in "${REPOS[@]}"; do
         cd ..
     else
         echo "Клонируем $repo..."
-        git clone "${ELEMENT_ORG}/${repo}.git"
+        # Отключаем credential helper для клонирования публичных репозиториев без пароля
+        GIT_TERMINAL_PROMPT=0 git -c credential.helper= clone "${ELEMENT_ORG}/${repo}.git" 2>/dev/null || \
+        git clone "git@github.com:element-hq/${repo}.git" || {
+            echo "Ошибка: не удалось клонировать $repo"
+            echo "Попробуйте очистить сохраненные credentials: git credential reject https://github.com"
+        }
     fi
 done
 

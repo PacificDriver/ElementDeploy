@@ -1,7 +1,8 @@
 # PowerShell скрипт для клонирования репозиториев Element
 # Использование: .\clone-repos.ps1
 
-$ErrorActionPreference = "Stop"
+# Не останавливаем скрипт при ошибках, чтобы обрабатывать ошибки клонирования вручную
+$ErrorActionPreference = "Continue"
 
 $ELEMENT_ORG = "https://github.com/element-hq"
 $REPOS_DIR = ".\element-repos"
@@ -36,7 +37,34 @@ foreach ($repo in $REPOS) {
         Set-Location $REPOS_DIR
     } else {
         Write-Host "Клонируем $repo..." -ForegroundColor Cyan
-        git clone "${ELEMENT_ORG}/${repo}.git"
+        # Отключаем credential helper для клонирования публичных репозиториев без пароля
+        $httpsUrl = "${ELEMENT_ORG}/${repo}.git"
+        $sshUrl = "git@github.com:element-hq/${repo}.git"
+        
+        # Пробуем HTTPS с отключенным credential helper (без пароля для публичных репозиториев)
+        try {
+            $null = git -c credential.helper= clone $httpsUrl 2>&1
+            if ($LASTEXITCODE -eq 0) {
+                Write-Host "✅ Успешно клонирован через HTTPS" -ForegroundColor Green
+            } else {
+                throw "HTTPS failed"
+            }
+        } catch {
+            Write-Host "Пробуем SSH..." -ForegroundColor Yellow
+            try {
+                $null = git clone $sshUrl 2>&1
+                if ($LASTEXITCODE -eq 0) {
+                    Write-Host "✅ Успешно клонирован через SSH" -ForegroundColor Green
+                } else {
+                    throw "SSH failed"
+                }
+            } catch {
+                Write-Host "❌ Ошибка: не удалось клонировать $repo" -ForegroundColor Red
+                Write-Host "   Попробуйте очистить сохраненные credentials:" -ForegroundColor Yellow
+                Write-Host "   git credential-manager-core erase" -ForegroundColor Yellow
+                Write-Host "   (затем введите: https://github.com)" -ForegroundColor Yellow
+            }
+        }
     }
 }
 
