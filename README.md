@@ -10,6 +10,8 @@
 ├── deploy.sh / .ps1                # Скрипты деплоя
 ├── fix-sdk-versions.sh / .ps1      # Фиксация версий SDK
 ├── test-connection.sh / .ps1       # Проверка взаимодействия
+├── cleanup.sh / .ps1               # Очистка ресурсов
+├── cleanup-full.sh / .ps1          # Полная очистка (удаляет всё)
 ├── docker-compose.yml              # Docker Compose конфигурация
 ├── .env.example                    # Пример файла переменных окружения
 ├── config/                         # Конфигурационные файлы
@@ -149,6 +151,52 @@ ELEMENT_CALL_VERSION=0.5.0
 ```
 
 После изменения версий запустите `fix-sdk-versions.sh` для применения изменений.
+
+## Очистка ресурсов
+
+### Обычная очистка
+
+Удаляет все созданные ресурсы (контейнеры, volumes, репозитории), но сохраняет конфигурационные файлы и `.env`:
+
+**Linux/Mac:**
+```bash
+chmod +x cleanup.sh
+./cleanup.sh
+```
+
+**Windows:**
+```powershell
+.\cleanup.ps1
+```
+
+### Полная очистка (включая .env)
+
+Удаляет всё, включая `.env` файл и конфигурации:
+
+**Linux/Mac:**
+```bash
+./cleanup.sh --all
+```
+
+**Windows:**
+```powershell
+.\cleanup.ps1 -All
+```
+
+### Радикальная очистка (удаляет ВСЁ)
+
+⚠️ **ВНИМАНИЕ**: Удаляет всю директорию проекта!
+
+**Linux/Mac:**
+```bash
+chmod +x cleanup-full.sh
+./cleanup-full.sh
+```
+
+**Windows:**
+```powershell
+.\cleanup-full.ps1
+```
 
 ## Проверка взаимодействия с Element X
 

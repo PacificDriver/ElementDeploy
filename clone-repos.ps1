@@ -32,37 +32,67 @@ foreach ($repo in $REPOS) {
         Set-Location $repoPath
         git pull origin main 2>$null
         if ($LASTEXITCODE -ne 0) {
-            git pull origin master
+            git pull origin master 2>$null
+            if ($LASTEXITCODE -ne 0) {
+                Write-Host "⚠️  Не удалось обновить $repo" -ForegroundColor Yellow
+            }
         }
         Set-Location $REPOS_DIR
     } else {
         Write-Host "Клонируем $repo..." -ForegroundColor Cyan
-        # Отключаем credential helper для клонирования публичных репозиториев без пароля
-        $httpsUrl = "${ELEMENT_ORG}/${repo}.git"
-        $sshUrl = "git@github.com:element-hq/${repo}.git"
         
-        # Пробуем HTTPS с отключенным credential helper (без пароля для публичных репозиториев)
+        # Используем только HTTPS для публичных репозиториев
+        $httpsUrl = "${ELEMENT_ORG}/${repo}.git"
+        
+        # Пробуем клонировать с отключенным credential helper
+        $env:GIT_TERMINAL_PROMPT = "0"
+        $env:GIT_ASKPASS = "echo"
+        
+        $cloneSuccess = $false
+        
+        # Пробуем без credential helper
         try {
-            $null = git -c credential.helper= clone $httpsUrl 2>&1
+            $null = git -c credential.helper= clone --depth=1 $httpsUrl 2>&1
             if ($LASTEXITCODE -eq 0) {
-                Write-Host "✅ Успешно клонирован через HTTPS" -ForegroundColor Green
-            } else {
-                throw "HTTPS failed"
+                Write-Host "✅ $repo успешно клонирован через HTTPS" -ForegroundColor Green
+                $cloneSuccess = $true
             }
         } catch {
-            Write-Host "Пробуем SSH..." -ForegroundColor Yellow
+            # Игнорируем ошибку, пробуем следующий способ
+        }
+        
+        # Если не получилось, пробуем обычный способ
+        if (-not $cloneSuccess) {
             try {
-                $null = git clone $sshUrl 2>&1
+                $null = git clone --depth=1 $httpsUrl 2>&1
                 if ($LASTEXITCODE -eq 0) {
-                    Write-Host "✅ Успешно клонирован через SSH" -ForegroundColor Green
-                } else {
-                    throw "SSH failed"
+                    Write-Host "✅ $repo успешно клонирован через HTTPS (с credentials)" -ForegroundColor Green
+                    $cloneSuccess = $true
                 }
             } catch {
-                Write-Host "❌ Ошибка: не удалось клонировать $repo" -ForegroundColor Red
-                Write-Host "   Попробуйте очистить сохраненные credentials:" -ForegroundColor Yellow
-                Write-Host "   git credential-manager-core erase" -ForegroundColor Yellow
-                Write-Host "   (затем введите: https://github.com)" -ForegroundColor Yellow
+                # Игнорируем ошибку
+            }
+        }
+        
+        # Если всё ещё не получилось
+        if (-not $cloneSuccess) {
+            Write-Host "❌ Ошибка: не удалось клонировать $repo" -ForegroundColor Red
+            Write-Host ""
+            Write-Host "Возможные решения:" -ForegroundColor Yellow
+            Write-Host "1. Очистите сохраненные credentials:" -ForegroundColor Yellow
+            Write-Host "   git credential-manager-core erase" -ForegroundColor Cyan
+            Write-Host "   (затем введите: https://github.com)" -ForegroundColor Yellow
+            Write-Host ""
+            Write-Host "2. Или клонируйте вручную:" -ForegroundColor Yellow
+            Write-Host "   cd $REPOS_DIR" -ForegroundColor Cyan
+            Write-Host "   git clone --depth=1 $httpsUrl" -ForegroundColor Cyan
+            Write-Host ""
+            
+            $continue = Read-Host "Продолжить с остальными репозиториями? (y/n)"
+            if ($continue -ne "y" -and $continue -ne "Y") {
+                Write-Host "Прервано пользователем" -ForegroundColor Red
+                Set-Location ..
+                exit 1
             }
         }
     }

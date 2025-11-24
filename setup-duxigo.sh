@@ -131,17 +131,32 @@ echo "🔐 Проверка SSL сертификатов..."
 if [ ! -f "certs/fullchain.pem" ] || [ ! -f "certs/privkey.pem" ]; then
     echo "⚠️  SSL сертификаты не найдены в certs/"
     echo ""
+    echo "🚀 Автоматическое получение SSL сертификатов через Docker..."
+    echo ""
     
-    # Проверяем наличие certbot
-    if command -v certbot &> /dev/null; then
-        echo "✅ Certbot найден. Автоматическое получение SSL сертификатов..."
+    # Запрашиваем email для Let's Encrypt
+    read -p "Введите email для уведомлений Let's Encrypt (необязательно, Enter чтобы пропустить): " CERT_EMAIL
+    
+    echo ""
+    echo "📋 Убедитесь, что домены ${DOMAIN} и ${CALL_DOMAIN} указывают на этот сервер (DNS)"
+    echo ""
+    read -p "Запустить автоматическое получение сертификатов сейчас? (y/n): " GET_CERTS_NOW
+    
+    if [ "$GET_CERTS_NOW" = "y" ] || [ "$GET_CERTS_NOW" = "Y" ]; then
         echo ""
+        echo "1️⃣ Запускаем nginx в режиме HTTP для ACME challenge..."
         
-        # Запрашиваем email для Let's Encrypt
-        read -p "Введите email для уведомлений Let's Encrypt (необязательно, можно пропустить Enter): " CERT_EMAIL
+        # Запускаем только nginx для ACME challenge
+        docker-compose up -d nginx 2>/dev/null || docker-compose up -d nginx
         
-        # Подготавливаем команду certbot
-        CERTBOT_CMD="sudo certbot certonly --standalone --agree-tos --non-interactive"
+        # Ждем запуска nginx
+        echo "⏳ Ожидание запуска nginx..."
+        sleep 5
+        
+        # Запускаем certbot в контейнере
+        echo "2️⃣ Получаем сертификаты через certbot..."
+        
+        CERTBOT_CMD="certbot certonly --webroot --webroot-path=/var/www/certbot --agree-tos --non-interactive"
         
         if [ -n "$CERT_EMAIL" ]; then
             CERTBOT_CMD="$CERTBOT_CMD --email $CERT_EMAIL"
@@ -151,56 +166,73 @@ if [ ! -f "certs/fullchain.pem" ] || [ ! -f "certs/privkey.pem" ]; then
         
         CERTBOT_CMD="$CERTBOT_CMD -d $DOMAIN -d $CALL_DOMAIN"
         
-        echo "Получаем сертификаты для доменов: $DOMAIN и $CALL_DOMAIN"
-        echo "Выполняем: $CERTBOT_CMD"
-        echo ""
-        
-        # Выполняем получение сертификатов
-        if eval $CERTBOT_CMD; then
+        if docker-compose run --rm certbot $CERTBOT_CMD; then
             echo "✅ Сертификаты успешно получены!"
             
-            # Копируем сертификаты в папку certs/
-            if [ -f "/etc/letsencrypt/live/${DOMAIN}/fullchain.pem" ] && [ -f "/etc/letsencrypt/live/${DOMAIN}/privkey.pem" ]; then
-                echo "Копируем сертификаты в папку certs/..."
-                sudo cp "/etc/letsencrypt/live/${DOMAIN}/fullchain.pem" certs/
-                sudo cp "/etc/letsencrypt/live/${DOMAIN}/privkey.pem" certs/
-                
-                # Устанавливаем правильные права доступа
-                sudo chmod 644 certs/fullchain.pem
-                sudo chmod 600 certs/privkey.pem
-                
-                # Если скопировали от root, меняем владельца на текущего пользователя
-                if [ "$(id -u)" != "0" ]; then
-                    sudo chown "$USER:$USER" certs/fullchain.pem certs/privkey.pem
+            # Копируем сертификаты из volume в папку certs/
+            echo "3️⃣ Копируем сертификаты в папку certs/..."
+            
+            # Используем временный контейнер для копирования
+            docker-compose run --rm -v "$(pwd)/certs:/certs" certbot sh -c "
+                cp /etc/letsencrypt/live/${DOMAIN}/fullchain.pem /certs/fullchain.pem && \
+                cp /etc/letsencrypt/live/${DOMAIN}/privkey.pem /certs/privkey.pem && \
+                chmod 644 /certs/fullchain.pem && \
+                chmod 600 /certs/privkey.pem
+            " || {
+                # Альтернативный способ - через docker cp
+                CERT_CONTAINER=$(docker-compose ps -q certbot 2>/dev/null || echo "")
+                if [ -z "$CERT_CONTAINER" ]; then
+                    CERT_CONTAINER=$(docker-compose run -d certbot sleep 60)
+                    sleep 2
                 fi
                 
+                docker cp ${CERT_CONTAINER}:/etc/letsencrypt/live/${DOMAIN}/fullchain.pem certs/fullchain.pem 2>/dev/null || true
+                docker cp ${CERT_CONTAINER}:/etc/letsencrypt/live/${DOMAIN}/privkey.pem certs/privkey.pem 2>/dev/null || true
+                
+                if [ -n "$CERT_CONTAINER" ]; then
+                    docker stop $CERT_CONTAINER 2>/dev/null || true
+                    docker rm $CERT_CONTAINER 2>/dev/null || true
+                fi
+            }
+            
+            if [ -f "certs/fullchain.pem" ] && [ -f "certs/privkey.pem" ]; then
                 echo "✅ Сертификаты скопированы в certs/"
+                
+                # Обновляем nginx конфигурацию для HTTPS
+                echo "4️⃣ Обновляем конфигурацию nginx для HTTPS..."
+                # Перезагружаем конфигурацию nginx - она уже будет содержать SSL, так как сертификаты теперь есть
+                docker-compose restart nginx
+                
+                echo ""
+                echo "✅ Готово! SSL сертификаты получены и настроены."
+                echo "🌐 Ваши сервисы теперь доступны по HTTPS:"
+                echo "   - https://${DOMAIN}"
+                echo "   - https://${CALL_DOMAIN}"
+                echo ""
+                echo "💡 Сертификаты будут автоматически обновляться каждые 12 часов контейнером certbot"
             else
-                echo "⚠️  Сертификаты не найдены в /etc/letsencrypt/live/${DOMAIN}/"
+                echo "⚠️  Не удалось скопировать сертификаты автоматически"
+                echo "Попробуйте вручную:"
+                echo "  docker-compose exec certbot cp /etc/letsencrypt/live/${DOMAIN}/fullchain.pem /certs/"
+                echo "  docker-compose exec certbot cp /etc/letsencrypt/live/${DOMAIN}/privkey.pem /certs/"
             fi
         else
             echo "❌ Ошибка при получении сертификатов"
             echo ""
             echo "Возможные причины:"
             echo "  - Домены не указывают на этот сервер (проверьте DNS)"
-            echo "  - Порты 80 и 443 уже заняты (остановите веб-сервер перед получением сертификатов)"
+            echo "  - Порты 80 и 443 уже заняты"
             echo "  - Сервер недоступен из интернета"
             echo ""
-            read -p "Нажмите Enter чтобы продолжить без SSL (или Ctrl+C для выхода): "
+            echo "Вы можете попробовать позже командой:"
+            echo "  docker-compose run --rm certbot certonly --webroot --webroot-path=/var/www/certbot -d ${DOMAIN} -d ${CALL_DOMAIN}"
         fi
     else
-        echo "⚠️  Certbot не установлен"
         echo ""
-        echo "Для установки certbot выполните:"
-        echo "   sudo apt-get update"
-        echo "   sudo apt-get install certbot"
-        echo ""
-        echo "Или получите сертификаты вручную:"
-        echo "   sudo certbot certonly --standalone -d ${DOMAIN} -d ${CALL_DOMAIN}"
-        echo "   sudo cp /etc/letsencrypt/live/${DOMAIN}/fullchain.pem certs/"
-        echo "   sudo cp /etc/letsencrypt/live/${DOMAIN}/privkey.pem certs/"
-        echo ""
-        read -p "Нажмите Enter после установки certbot и получения сертификатов (или для пропуска): "
+        echo "⚠️  Получение сертификатов пропущено."
+        echo "После настройки DNS запустите:"
+        echo "  docker-compose up -d nginx"
+        echo "  docker-compose run --rm certbot certonly --webroot --webroot-path=/var/www/certbot -d ${DOMAIN} -d ${CALL_DOMAIN}"
     fi
 else
     echo "✅ SSL сертификаты уже существуют"
@@ -208,11 +240,36 @@ fi
 
 # Обновление конфигурации nginx
 echo "⚙️  Обновление конфигурации nginx..."
-cat > nginx/conf.d/element.conf << EOF
-# Element Web
+
+# Проверяем наличие сертификатов для определения какой конфигурации использовать
+if [ -f "certs/fullchain.pem" ] && [ -f "certs/privkey.pem" ]; then
+    # Сертификаты уже есть - используем HTTPS конфигурацию
+    cat > nginx/conf.d/element.conf << EOF
+# ACME Challenge для обновления сертификатов
 server {
     listen 80;
+    server_name ${DOMAIN} ${CALL_DOMAIN};
+
+    location /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+    }
+
+    location / {
+        return 301 https://\$host\$request_uri;
+    }
+}
+
+# Element Web - HTTPS
+server {
+    listen 443 ssl http2;
     server_name ${DOMAIN};
+
+    ssl_certificate /etc/nginx/certs/fullchain.pem;
+    ssl_certificate_key /etc/nginx/certs/privkey.pem;
+    
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers HIGH:!aNULL:!MD5;
+    ssl_prefer_server_ciphers on;
 
     location / {
         proxy_pass http://element-web:80;
@@ -223,10 +280,17 @@ server {
     }
 }
 
-# Element Call
+# Element Call - HTTPS
 server {
-    listen 80;
+    listen 443 ssl http2;
     server_name ${CALL_DOMAIN};
+
+    ssl_certificate /etc/nginx/certs/fullchain.pem;
+    ssl_certificate_key /etc/nginx/certs/privkey.pem;
+    
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers HIGH:!aNULL:!MD5;
+    ssl_prefer_server_ciphers on;
 
     location / {
         proxy_pass http://element-call:3000;
@@ -241,6 +305,47 @@ server {
     }
 }
 EOF
+else
+    # Сертификатов нет - используем HTTP конфигурацию с поддержкой ACME challenge
+    cat > nginx/conf.d/element.conf << EOF
+# Временная конфигурация для получения SSL сертификатов
+# ACME Challenge
+server {
+    listen 80;
+    server_name ${DOMAIN} ${CALL_DOMAIN};
+
+    location /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+    }
+
+    # Element Web
+    location / {
+        if (\$host = ${DOMAIN}) {
+            proxy_pass http://element-web:80;
+            proxy_set_header Host \$host;
+            proxy_set_header X-Real-IP \$remote_addr;
+            proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto \$scheme;
+        }
+    }
+
+    # Element Call
+    location / {
+        if (\$host = ${CALL_DOMAIN}) {
+            proxy_pass http://element-call:3000;
+            proxy_set_header Host \$host;
+            proxy_set_header X-Real-IP \$remote_addr;
+            proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto \$scheme;
+            
+            proxy_http_version 1.1;
+            proxy_set_header Upgrade \$http_upgrade;
+            proxy_set_header Connection "upgrade";
+        }
+    }
+}
+EOF
+fi
 
 echo "✅ Конфигурация обновлена"
 
@@ -253,5 +358,9 @@ echo "  ./deploy.sh docker"
 echo ""
 echo "Или вручную:"
 echo "  docker-compose up -d"
+echo ""
+echo "📝 Примечания:"
+echo "  - SSL сертификаты будут автоматически обновляться каждые 12 часов"
+echo "  - Для ручного обновления: ./renew-certificates.sh"
 echo ""
 

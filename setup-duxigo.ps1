@@ -156,6 +156,7 @@ if (-not (Test-Path "certs\fullchain.pem") -or -not (Test-Path "certs\privkey.pe
     
     # Проверяем наличие certbot (может быть через WSL или установлен на Windows)
     $certbotFound = $false
+    $certbotCmd = $null
     
     # Проверяем через WSL
     if (Get-Command wsl -ErrorAction SilentlyContinue) {
@@ -164,6 +165,7 @@ if (-not (Test-Path "certs\fullchain.pem") -or -not (Test-Path "certs\privkey.pe
         if ($LASTEXITCODE -eq 0 -and $wslCheck) {
             $certbotFound = $true
             $certbotCmd = "wsl"
+            Write-Host "✅ Certbot найден в WSL" -ForegroundColor Green
         }
     }
     
@@ -172,13 +174,14 @@ if (-not (Test-Path "certs\fullchain.pem") -or -not (Test-Path "certs\privkey.pe
         $certbotPath = Get-Command certbot -ErrorAction SilentlyContinue
         if ($certbotPath) {
             $certbotFound = $true
-            $certbotCmd = "certbot"
+            $certbotCmd = "direct"
+            Write-Host "✅ Certbot найден в Windows" -ForegroundColor Green
         }
     }
     
     if ($certbotFound) {
-        Write-Host "✅ Certbot найден. Автоматическое получение SSL сертификатов..." -ForegroundColor Green
         Write-Host ""
+        Write-Host "Автоматическое получение SSL сертификатов..." -ForegroundColor Cyan
         
         # Запрашиваем email для Let's Encrypt
         $CERT_EMAIL = Read-Host "Введите email для уведомлений Let's Encrypt (необязательно, Enter чтобы пропустить)"
@@ -197,14 +200,18 @@ if (-not (Test-Path "certs\fullchain.pem") -or -not (Test-Path "certs\privkey.pe
         
         $certbotArgs += " -d $DOMAIN -d $CALL_DOMAIN"
         
-        Write-Host "Выполняем: $certbotCmd $certbotArgs" -ForegroundColor Yellow
+        Write-Host "Выполняем: certbot $certbotArgs" -ForegroundColor Yellow
         Write-Host ""
         
         # Выполняем получение сертификатов
+        $currentDir = (Get-Location).Path
+        
         try {
             if ($certbotCmd -eq "wsl") {
+                # Для WSL выполняем через wsl
                 $result = wsl bash -c "sudo certbot $certbotArgs" 2>&1
             } else {
+                # Для прямого запуска на Windows
                 $result = & certbot $certbotArgs.Split(" ") 2>&1
             }
             
@@ -212,46 +219,51 @@ if (-not (Test-Path "certs\fullchain.pem") -or -not (Test-Path "certs\privkey.pe
                 Write-Host "✅ Сертификаты успешно получены!" -ForegroundColor Green
                 
                 # Копируем сертификаты в папку certs/
-                $certPath = "/etc/letsencrypt/live/$DOMAIN"
+                Write-Host "Копируем сертификаты в папку certs/..." -ForegroundColor Cyan
                 
-                if ($certbotCmd -like "wsl*") {
-                    # Для WSL копируем через WSL
-                    Write-Host "Копируем сертификаты из WSL в certs/..." -ForegroundColor Cyan
-                    $currentDir = (Get-Location).Path
-                    
-                    # Конвертируем Windows путь в WSL путь
+                if ($certbotCmd -eq "wsl") {
+                    # Для WSL: получаем текущий путь Windows и конвертируем в WSL путь
                     $wslPath = wsl wslpath -a "$currentDir" 2>$null
                     if (-not $wslPath) {
                         # Если wslpath не работает, используем стандартный путь
                         $wslPath = $currentDir -replace "C:", "/mnt/c" -replace "\\", "/"
                     }
                     
-                    # Копируем сертификаты через WSL
+                    # Копируем через WSL
                     wsl bash -c "sudo cp /etc/letsencrypt/live/$DOMAIN/fullchain.pem $wslPath/certs/fullchain.pem" 2>&1 | Out-Null
                     wsl bash -c "sudo cp /etc/letsencrypt/live/$DOMAIN/privkey.pem $wslPath/certs/privkey.pem" 2>&1 | Out-Null
                     
                     # Меняем владельца файлов
                     wsl bash -c "sudo chown `$(whoami):`$(whoami) $wslPath/certs/*.pem" 2>&1 | Out-Null
                 } else {
-                    # Для Windows certbot путь может отличаться
-                    $winCertPath = "C:\etc\letsencrypt\live\$DOMAIN"
-                    if (Test-Path "$winCertPath\fullchain.pem") {
-                        Copy-Item "$winCertPath\fullchain.pem" "certs\" -Force
-                        Copy-Item "$winCertPath\privkey.pem" "certs\" -Force
+                    # Для Windows: проверяем стандартные пути
+                    $winCertPaths = @(
+                        "C:\etc\letsencrypt\live\$DOMAIN",
+                        "C:\ProgramData\letsencrypt\live\$DOMAIN"
+                    )
+                    
+                    foreach ($winCertPath in $winCertPaths) {
+                        if (Test-Path "$winCertPath\fullchain.pem") {
+                            Copy-Item "$winCertPath\fullchain.pem" "certs\" -Force
+                            Copy-Item "$winCertPath\privkey.pem" "certs\" -Force
+                            break
+                        }
                     }
                 }
                 
                 if ((Test-Path "certs\fullchain.pem") -and (Test-Path "certs\privkey.pem")) {
                     Write-Host "✅ Сертификаты скопированы в certs/" -ForegroundColor Green
                 } else {
-                    Write-Host "⚠️  Сертификаты не найдены. Возможно нужно скопировать вручную." -ForegroundColor Yellow
+                    Write-Host "⚠️  Сертификаты не найдены в certs/. Возможно нужно скопировать вручную из:" -ForegroundColor Yellow
+                    Write-Host "   /etc/letsencrypt/live/$DOMAIN/ (Linux/WSL)" -ForegroundColor Yellow
+                    Write-Host "   или C:\etc\letsencrypt\live\$DOMAIN\ (Windows)" -ForegroundColor Yellow
                 }
             } else {
                 Write-Host "❌ Ошибка при получении сертификатов" -ForegroundColor Red
                 Write-Host ""
                 Write-Host "Возможные причины:" -ForegroundColor Yellow
                 Write-Host "  - Домены не указывают на этот сервер (проверьте DNS)" -ForegroundColor Yellow
-                Write-Host "  - Порты 80 и 443 уже заняты" -ForegroundColor Yellow
+                Write-Host "  - Порты 80 и 443 уже заняты (остановите веб-сервер перед получением)" -ForegroundColor Yellow
                 Write-Host "  - Сервер недоступен из интернета" -ForegroundColor Yellow
                 Write-Host ""
                 $continue = Read-Host "Нажмите Enter чтобы продолжить без SSL (или Ctrl+C для выхода)"
@@ -264,22 +276,27 @@ if (-not (Test-Path "certs\fullchain.pem") -or -not (Test-Path "certs\privkey.pe
     } else {
         Write-Host "⚠️  Certbot не найден" -ForegroundColor Yellow
         Write-Host ""
-        Write-Host "Для Linux/Mac: установите certbot:" -ForegroundColor Cyan
+        Write-Host "Для Linux: установите certbot:" -ForegroundColor Cyan
         Write-Host "   sudo apt-get install certbot" -ForegroundColor Yellow
         Write-Host ""
         Write-Host "Для Windows: используйте WSL или получите сертификаты на Linux сервере" -ForegroundColor Cyan
         Write-Host ""
         Write-Host "Или получите сертификаты вручную:" -ForegroundColor Cyan
-        Write-Host "   certbot certonly --standalone -d $DOMAIN -d $CALL_DOMAIN" -ForegroundColor Yellow
+        Write-Host "   sudo certbot certonly --standalone -d $DOMAIN -d $CALL_DOMAIN" -ForegroundColor Yellow
         Write-Host ""
         $sslReady = Read-Host "Нажмите Enter после получения сертификатов (или для пропуска): "
         
         # Если пользователь ввел путь к сертификатам
         if ($sslReady -and (Test-Path $sslReady)) {
             $certDir = $sslReady
-            if (Test-Path "$certDir\fullchain.pem" -and Test-Path "$certDir\privkey.pem") {
-                Copy-Item "$certDir\fullchain.pem" "certs\" -Force
-                Copy-Item "$certDir\privkey.pem" "certs\" -Force
+            if (Test-Path "$certDir\fullchain.pem" -or Test-Path "$certDir/fullchain.pem") {
+                if (Test-Path "$certDir\fullchain.pem") {
+                    Copy-Item "$certDir\fullchain.pem" "certs\" -Force
+                    Copy-Item "$certDir\privkey.pem" "certs\" -Force
+                } else {
+                    Copy-Item "$certDir/fullchain.pem" "certs\" -Force
+                    Copy-Item "$certDir/privkey.pem" "certs\" -Force
+                }
                 Write-Host "✅ Сертификаты скопированы из $certDir" -ForegroundColor Green
             }
         }
